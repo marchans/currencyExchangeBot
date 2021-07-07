@@ -1,30 +1,27 @@
 const TelegramBot = require('node-telegram-bot-api');
-
 const schedule = require('node-schedule');
 
-// replace the value below with the Telegram token you receive from @BotFather
 
 const token = '453855287:AAFWGwmSQKOEVcoh2rFuV50_VZR1f-GXPy8';
+const PORT = process.env.PORT || 3000;
+const URL = process.env.URL || 'https://currency-exchange-bot.herokuapp.com';
 
 
-// Create a bot that uses 'polling' to fetch new updates
+//Creating a bot that uses a webhook to get updates
+var port = process.env.PORT || 443;
+var host = process.env.HOST;
+var bot = new TelegramBot(token, {webHook: {port: port, host: host}});
+var externalUrl = 'https://currency-exchange-bot.herokuapp.com/';
+bot.setWebHook(externalUrl + ':443/bot' + token);
 
-const bot = new TelegramBot(token, {polling: true});
-
-
+//NBU api URL to get updated exchange rates
 const exchangeRateURL = 'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json';
-
+//static values for some of the most used currencies in case something goes wrong with the update
 var exchangeRates = {
-
     UAH: 1.0,
-
     USD: 27.0,
-
     EUR: 30.0,
-
-    GBP: 36.0,
-
-
+    GBP: 36.0
 };
 
 
@@ -48,48 +45,28 @@ function updateExchangeRates() {
     var request = require('request');
 
     request.get(exchangeRateURL, {}, function (err, res, data) {
-
         if (err) {
-
             return console.log(err);
-
         }
 
         if (res.statusCode != 209) {
-
             var JSONDATA = data;
-
             exchangeRates = [];
-
             exchangeRates['UAH'] = 1;
-
             var jsonList = JSON.parse(JSONDATA);
-
             jsonList.forEach(function (entry) {
-
                 exchangeRates[entry.cc] = entry.rate;
             });
-            // console.log(exchangeRates);
-
+            console.log("Exchange rates updated!!!!!!");
         }
-
     });
 
 
 }
 
 
-//updates exchange rates every day at 9 am
-
-schedule.scheduleJob('0 9 * * * ', function () {
-
-    updateExchangeRates();
-
-});
-
-
-//updates exchange rates every day at 9 am
-schedule.scheduleJob('0 9 * * * ', function () {
+//updates exchange rates every 15 minutes
+schedule.scheduleJob('* * * * *', function () {
     updateExchangeRates();
 });
 
@@ -100,70 +77,56 @@ bot.onText(/\/update/, function (msg, match) {
 
 
 bot.onText(/\/convert (.+)/, function (msg, match) {
+    updateExchangeRates();
+        var tokens = msg.text.split(" ");
+        //request validation
+        if (tokens.length != 5) {
+            bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь /help.");
+            return;
+        }
+        var re = /^\$?([0-9]{1,3},([0-9]{3},)*[0-9]{3}|[0-9]+)(.[0-9][0-9])?$/;
+        if (!re.test(tokens[1])) {
+            bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь /help.");
+            return;
+        }
+        if (!exchangeRates.hasOwnProperty(tokens[2].toUpperCase()) || !exchangeRates.hasOwnProperty(tokens[4].toUpperCase())) {
 
-    var tokens = msg.text.split(" ");
+            bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь /help.");
+            return;
 
-    if (tokens.length != 5) {
-        bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь \help.");
-        return;
 
-    }
-
-    var re = /^\$?([0-9]{1,3},([0-9]{3},)*[0-9]{3}|[0-9]+)(.[0-9][0-9])?$/;
-    if (!re.test(tokens[1])) {
-        bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь \help.");
-        return;
-    }
-
-    var arr = ['uah', 'usd', 'eur', 'gbp', 'rub', 'pln', 'jpy', 'cny' ];
-
-    function find(array, value) {
-        if (array.indexOf) {
-            return array.indexOf(value);
         }
 
-        for (var i = 0; i < array.length; i++) {
-            if (array[i] === value) return 1;
+        var initSum = tokens[1];
+        if (isNaN(initSum)) {
+            bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь /help.");
+            return;
         }
-
-        return -1;
-    }
-
-
-    if (find(arr, tokens[2]) === -1 || find(arr, tokens[4]) === -1) {
-        bot.sendMessage(msg.chat.id, "Неправильний формат запису. Скористайтесь \help.");
-        return;
-    }
+        // request processing (converting from initial currency to UAH and then to the desired currency
+        var initCurrency = tokens[2].toUpperCase();
+        var toCurrency = tokens[4].toUpperCase();
+        var initCurrencyToUahRate = exchangeRates[initCurrency];
+        var uahToToCurrencyRate = exchangeRates[toCurrency];
+        var finalSum = initSum * initCurrencyToUahRate / uahToToCurrencyRate;
+        bot.sendMessage(msg.chat.id, "Сума після конвертації: " + finalSum.toFixed(2) + toCurrency);
 
 
-    var initSum = tokens[1];
-
-    var initCurrency = tokens[2].toUpperCase();
-
-    var toCurrency = tokens[4].toUpperCase();
-
-    var initCurrencyToUahRate = exchangeRates[initCurrency];
-
-    var uahToToCurrencyRate = exchangeRates[toCurrency];
-
-    var finalSum = initSum * initCurrencyToUahRate / uahToToCurrencyRate;
-
-    bot.sendMessage(msg.chat.id, "Сума після конвертації: " + finalSum.toFixed(2) + toCurrency);
 
 
 });
 
 
 bot.onText(/\/start/, function (msg, match) {
-
     updateExchangeRates();
-
+    bot.sendMessage(msg.chat.id, helpMessage);
 });
 
 
 bot.onText(/\/rates/, function (msg, match) {
-    var exchangeRatesForToday = "Курс валют (до гривні) на сьогодні\n" + "🇺🇸 1.00 USD -- " + exchangeRates['USD'].toFixed(3) + " гривень\n" + "🇪🇺 1.00 EUR -- " + exchangeRates['EUR'].toFixed(3) + " гривень\n" + "🇬🇧 1.00 GBP -- " + exchangeRates['GBP'].toFixed(3) + " гривень\n" + "🇷🇺 1.00 RUB -- " + exchangeRates['RUB'].toFixed(3) + " гривень\n";
-    bot.sendMessage(msg.chat.id, exchangeRatesForToday);
+    updateExchangeRates();
+        var exchangeRatesForToday = "Курс валют (до гривні) на сьогодні\n" + "🇺🇸 1.00 USD -- " + exchangeRates['USD'].toFixed(3) + " гривень\n" + "🇪🇺 1.00 EUR -- " + exchangeRates['EUR'].toFixed(3) + " гривень\n" + "🇬🇧 1.00 GBP -- " + exchangeRates['GBP'].toFixed(3) + " гривень\n" + "🇷🇺 1.00 RUB -- " + exchangeRates['RUB'].toFixed(3) + " гривень\n";
+        bot.sendMessage(msg.chat.id, exchangeRatesForToday);
+
 });
 
 bot.onText(/\/help/, function (msg, match) {
